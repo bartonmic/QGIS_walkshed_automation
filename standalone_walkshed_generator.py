@@ -1,7 +1,7 @@
 """
 Standalone Walkshed Generator
 Processes walksheds for transit stops using network analysis, one route at a time
-Optimized by pre-processing network for all stops
+Optimized by pre-processing network for all stops and further optimizing per route
 """
 
 # ------------------------ CONFIGURATION --------------------------#
@@ -11,7 +11,7 @@ NETWORK_FILE = "C:/Users/micba/OneDrive/Documents/trimet/qgis_walkshed_automatio
 
 # Output Settings
 OUTPUT_FOLDER = "C:/Users/micba/OneDrive/Documents/trimet/projects/QGIS_walkshed_automation/output"
-OUTPUT_PREFIX = "small_subset2"  # prefix for output files (can be empty string)
+OUTPUT_PREFIX = "small_subset3"  # prefix for output files (can be empty string)
 
 # Processing Parameters
 DISTANCE_METERS = 804.672  # walking distance for walkshed (1/2 mile)
@@ -82,6 +82,38 @@ def prepare_network(stops_layer, network_layer, distance_meters):
         
     except Exception as e:
         print(f"Error in prepare_network: {str(e)}")
+        return None
+
+def prepare_route_network(prepared_network, stops, distance_meters):
+    """Further clip the network for a specific route's stops"""
+    try:
+        print("Preparing network for route...")
+        
+        # Create buffer around route's stops
+        route_buffer_params = {
+            'INPUT': stops,
+            'DISTANCE': QgsExpression(f' {distance_meters} * 3.3').evaluate(),
+            'SEGMENTS': 5,
+            'END_CAP_STYLE': 0,
+            'JOIN_STYLE': 0,
+            'MITER_LIMIT': 2,
+            'DISSOLVE': True,
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        route_buffer_result = processing.run('native:buffer', route_buffer_params)
+        
+        # Clip pre-processed network to route buffer
+        route_clip_params = {
+            'INPUT': prepared_network,
+            'OVERLAY': route_buffer_result['OUTPUT'],
+            'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
+        }
+        route_clip_result = processing.run('native:clip', route_clip_params)
+        
+        return route_clip_result['OUTPUT']
+        
+    except Exception as e:
+        print(f"Error in prepare_route_network: {str(e)}")
         return None
 
 def create_walkshed(stops_layer, prepared_network, distance_meters, concave_threshold):
@@ -190,7 +222,13 @@ def process_routes(stops_layer, network_layer, output_prefix=""):
         print(f"Processing {len(features)} stops")
         
         try:
-            results = create_walkshed(filtered_stops, prepared_network, DISTANCE_METERS, CONCAVE_THRESHOLD)
+            # Further clip network for this specific route
+            route_network = prepare_route_network(prepared_network, filtered_stops, DISTANCE_METERS)
+            if not route_network:
+                print(f"Failed to prepare network for route {route}")
+                continue
+            
+            results = create_walkshed(filtered_stops, route_network, DISTANCE_METERS, CONCAVE_THRESHOLD)
             if results:
                 all_results.append(results)
                 print(f"Route {route} processed successfully")
