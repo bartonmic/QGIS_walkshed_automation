@@ -1,7 +1,7 @@
 """
 Walkshed Generator Script
 Iterates through routes in a stops layer and generates walksheds using the Create Walksheds model
-Outputs all routes to single walksheds and dissolved files
+Outputs all routes to single walksheds and dissolved files with custom prefix option
 """
 # ------------------------ CONFIGURATION --------------------------#
 # Layer Names (must match exactly what appears in your Layers panel)
@@ -12,12 +12,13 @@ DISTANCE_METERS = 804.672  # walking distance for walkshed
 CONCAVE_THRESHOLD = 0.015  # concave hull threshold
 # Output Settings
 OUTPUT_FOLDER = "C:/Users/micba/OneDrive/Documents/trimet/projects/QGIS_walkshed_automation/output"
+OUTPUT_PREFIX = "test_"  # prefix for output files (can be empty string)
 # -------------------------------------------------------------#
 from qgis.core import QgsProject, QgsProcessing, QgsProcessingFeedback, QgsVectorLayer
 import processing
 import os
 
-def run_walkshed_by_route(stops_layer, network_layer, distance_meters=DISTANCE_METERS, 
+def run_walkshed_by_route(stops_layer, network_layer, output_prefix="", distance_meters=DISTANCE_METERS, 
                           concave_threshold=CONCAVE_THRESHOLD):
     # Get unique route values
     routes = sorted(set(f['rte'] for f in stops_layer.getFeatures()))
@@ -79,8 +80,10 @@ def run_walkshed_by_route(stops_layer, network_layer, distance_meters=DISTANCE_M
     
     # Merge all results at the end
     if walksheds_list:
-        walksheds_final = os.path.join(OUTPUT_FOLDER, 'walksheds_all.gpkg')
-        dissolved_final = os.path.join(OUTPUT_FOLDER, 'dissolved_all.gpkg')
+        # Create output filenames with prefix
+        prefix = f"{output_prefix}_" if output_prefix else ""
+        walksheds_final = os.path.join(OUTPUT_FOLDER, f'{prefix}walksheds_all.gpkg')
+        dissolved_final = os.path.join(OUTPUT_FOLDER, f'{prefix}dissolved_all.gpkg')
         
         print(f"\nMerging results:")
         print(f"Walksheds to merge: {len(walksheds_list)}")
@@ -125,7 +128,7 @@ def main():
     
     # Run processing
     print("Processing...")
-    run_walkshed_by_route(stops_layer, network_layer)
+    run_walkshed_by_route(stops_layer, network_layer, OUTPUT_PREFIX)
     print("Processing complete!")
 
 # Run the script
