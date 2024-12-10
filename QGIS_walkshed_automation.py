@@ -1,7 +1,7 @@
 """
 Walkshed Generator Script
 Iterates through routes in a stops layer and generates walksheds using the Create Walksheds model
-Outputs all routes to single walksheds and dissolved files with custom prefix option
+Outputs walksheds, dissolved walksheds, and service area lines
 """
 # ------------------------ CONFIGURATION --------------------------#
 # Layer Names (must match exactly what appears in your Layers panel)
@@ -11,8 +11,8 @@ NETWORK_LAYER_NAME = "full_ped_net"
 DISTANCE_METERS = 804.672  # walking distance for walkshed
 CONCAVE_THRESHOLD = 0.015  # concave hull threshold
 # Output Settings
-OUTPUT_FOLDER = "C:/Users/micba/OneDrive/Documents/trimet/projects/QGIS_walkshed_automation/output"
-OUTPUT_PREFIX = "test_"  # prefix for output files (can be empty string)
+OUTPUT_FOLDER = ""
+OUTPUT_PREFIX = ""  # prefix for output files (can be empty string)
 # -------------------------------------------------------------#
 from qgis.core import QgsProject, QgsProcessing, QgsProcessingFeedback, QgsVectorLayer
 import processing
@@ -33,6 +33,7 @@ def run_walkshed_by_route(stops_layer, network_layer, output_prefix="", distance
     # Create temporary list to store outputs
     walksheds_list = []
     dissolved_list = []
+    service_area_lines_list = []
     
     total_routes = len(routes)
     for i, route in enumerate(routes):
@@ -72,6 +73,7 @@ def run_walkshed_by_route(stops_layer, network_layer, output_prefix="", distance
             # Add results to our lists
             walksheds_list.append(result['walksheds_poly'])
             dissolved_list.append(result['walksheds_dissolved'])
+            service_area_lines_list.append(result['service_area_lines'])
             
         except Exception as e:
             feedback.pushInfo(f"Error processing route {route}: {str(e)}")
@@ -84,10 +86,12 @@ def run_walkshed_by_route(stops_layer, network_layer, output_prefix="", distance
         prefix = f"{output_prefix}_" if output_prefix else ""
         walksheds_final = os.path.join(OUTPUT_FOLDER, f'{prefix}walksheds_all.gpkg')
         dissolved_final = os.path.join(OUTPUT_FOLDER, f'{prefix}dissolved_all.gpkg')
+        service_area_lines_final = os.path.join(OUTPUT_FOLDER, f'{prefix}service_area_lines_all.gpkg')
         
         print(f"\nMerging results:")
         print(f"Walksheds to merge: {len(walksheds_list)}")
         print(f"Dissolved to merge: {len(dissolved_list)}")
+        print(f"Service area lines to merge: {len(service_area_lines_list)}")
         
         # Merge walksheds
         processing.run("native:mergevectorlayers", {
@@ -101,9 +105,16 @@ def run_walkshed_by_route(stops_layer, network_layer, output_prefix="", distance
             'OUTPUT': dissolved_final
         })
         
+        # Merge service area lines
+        processing.run("native:mergevectorlayers", {
+            'LAYERS': service_area_lines_list,
+            'OUTPUT': service_area_lines_final
+        })
+        
         print(f"\nFinal outputs created:")
         print(f"- Combined walksheds: {walksheds_final}")
         print(f"- Combined dissolved walksheds: {dissolved_final}")
+        print(f"- Combined service area lines: {service_area_lines_final}")
 
 # Main execution
 def main():
