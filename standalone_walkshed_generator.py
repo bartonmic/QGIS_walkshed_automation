@@ -1,6 +1,6 @@
 """
 Standalone Walkshed Generator
-Processes walksheds for transit stops using network analysis
+Processes walksheds for transit stops using network analysis, one route at a time
 """
 
 # ------------------------ CONFIGURATION --------------------------#
@@ -15,7 +15,6 @@ OUTPUT_PREFIX = ""  # prefix for output files (can be empty string)
 # Processing Parameters
 DISTANCE_METERS = 804.672  # walking distance for walkshed (1/2 mile)
 CONCAVE_THRESHOLD = 0.015  # concave hull threshold
-ROUTES_PER_BATCH = 5      # number of routes to process in each batch
 # -------------------------------------------------------------#
 
 from qgis.core import QgsApplication, QgsVectorLayer, QgsProcessing, QgsProcessingFeedback, QgsExpression
@@ -125,7 +124,6 @@ def create_walkshed(stops_layer, network_layer, distance_meters, concave_thresho
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
         walksheds_result = processing.run('native:clip', final_clip_params)
-        results['walksheds_poly'] = walksheds_result['OUTPUT']
         print("Final walksheds created")
         
         # Step 8: Dissolve by route
@@ -136,14 +134,77 @@ def create_walkshed(stops_layer, network_layer, distance_meters, concave_thresho
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
         dissolve_result = processing.run('native:dissolve', dissolve_params)
-        results['walksheds_dissolved'] = dissolve_result['OUTPUT']
         print("Walksheds dissolved")
         
-        return results
+        return {
+            'walksheds': walksheds_result['OUTPUT'],
+            'dissolved': dissolve_result['OUTPUT'],
+            'service_lines': service_result['OUTPUT_LINES']
+        }
         
     except Exception as e:
         print(f"Error in create_walkshed: {str(e)}")
         return None
+
+def process_routes(stops_layer, network_layer, output_prefix=""):
+    """Process all routes individually"""
+    
+    # Get unique route values
+    routes = sorted(set([f['rte'] for f in stops_layer.getFeatures()]))
+    total_routes = len(routes)
+    print(f"\nFound {total_routes} routes to process")
+    
+    # Create timestamp for this run
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    # Storage for all results
+    all_walksheds = []
+    all_dissolved = []
+    all_service_lines = []
+    
+    # Process each route individually
+    for i, route in enumerate(routes, 1):
+        print(f"\nProcessing route {route} ({i}/{total_routes})")
+        
+        # Create filtered stops layer for this route
+        filtered_stops = QgsVectorLayer("Point?crs=" + stops_layer.crs().authid(), "filtered_stops", "memory")
+        filtered_stops.dataProvider().addAttributes(stops_layer.fields())
+        filtered_stops.updateFields()
+        
+        features = [f for f in stops_layer.getFeatures() if f['rte'] == route]
+        filtered_stops.dataProvider().addFeatures(features)
+        print(f"Processing {len(features)} stops")
+        
+        try:
+            results = create_walkshed(filtered_stops, network_layer, DISTANCE_METERS, CONCAVE_THRESHOLD)
+            if results:
+                all_walksheds.append(results['walksheds'])
+                all_dissolved.append(results['dissolved'])
+                all_service_lines.append(results['service_area_lines'])
+                print(f"Route {route} processed successfully")
+            else:
+                print(f"Failed to process route {route}")
+        except Exception as e:
+            print(f"Error processing route {route}: {str(e)}")
+            continue
+    
+    # Save final combined results
+    prefix = f"{output_prefix}_" if output_prefix else ""
+    outputs = {
+        'walksheds': (all_walksheds, f'{prefix}walksheds_{timestamp}.gpkg'),
+        'dissolved': (all_dissolved, f'{prefix}dissolved_{timestamp}.gpkg'),
+        'service_lines': (all_service_lines, f'{prefix}service_lines_{timestamp}.gpkg')
+    }
+    
+    print("\nSaving final results...")
+    for output_type, (layers, filename) in outputs.items():
+        output_path = os.path.join(OUTPUT_FOLDER, filename)
+        processing.run("native:package", {
+            'LAYERS': layers,
+            'OUTPUT': output_path,
+            'OVERWRITE': True
+        })
+        print(f"Saved {output_type} to {output_path}")
 
 # Load the layers
 print("Loading layers...")
@@ -157,42 +218,8 @@ if not stops_layer.isValid() or not network_layer.isValid():
 
 print("Layers loaded successfully")
 
-# Test with one route
-print("\nTesting walkshed creation for first route...")
-test_route = sorted(set([f['rte'] for f in stops_layer.getFeatures()]))[0]
-
-# Create filtered layer for test route
-filtered_stops = QgsVectorLayer("Point?crs=" + stops_layer.crs().authid(), "filtered_stops", "memory")
-filtered_stops.dataProvider().addAttributes(stops_layer.fields())
-filtered_stops.updateFields()
-
-features = [f for f in stops_layer.getFeatures() if f['rte'] == test_route]
-filtered_stops.dataProvider().addFeatures(features)
-
-print(f"Processing route {test_route} with {len(features)} stops")
-
-# Create test walkshed
-results = create_walkshed(filtered_stops, network_layer, DISTANCE_METERS, CONCAVE_THRESHOLD)
-
-if results:
-    # Save test outputs
-    prefix = f"{OUTPUT_PREFIX}_test_" if OUTPUT_PREFIX else "test_"
-    test_outputs = {
-        'walksheds': os.path.join(OUTPUT_FOLDER, f'{prefix}walksheds.gpkg'),
-        'dissolved': os.path.join(OUTPUT_FOLDER, f'{prefix}dissolved.gpkg'),
-        'service_lines': os.path.join(OUTPUT_FOLDER, f'{prefix}service_lines.gpkg')
-    }
-    
-    print("\nSaving test outputs...")
-    for output_type, output_path in test_outputs.items():
-        processing.run("native:package", {
-            'LAYERS': [results[f'walksheds_poly' if output_type == 'walksheds' else 
-                              'walksheds_dissolved' if output_type == 'dissolved' else 
-                              'service_area_lines']],
-            'OUTPUT': output_path,
-            'OVERWRITE': True
-        })
-        print(f"Saved {output_type} to {output_path}")
+# Process all routes
+process_routes(stops_layer, network_layer, OUTPUT_PREFIX)
 
 # Clean up
 qgs.exitQgis()
