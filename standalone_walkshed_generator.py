@@ -1,17 +1,30 @@
 """
-Standalone Walkshed Generator
-Processes walksheds for transit stops using network analysis, one route at a time
-Optimized by pre-processing network for all stops and further optimizing per route
+Walkshed Generator
+
+Generates walksheds for transit stops using QGIS processing tools.
+Processes stops by route to create both individual and dissolved walksheds.
+
+Required inputs:
+- Stops shapefile: Point layer with 'rte' field
+- Network shapefile: Line layer containing pedestrian network
+
+Outputs:
+- Walksheds: Individual walksheds for each stop
+- Dissolved walksheds: Combined walksheds by route
+- Service lines: Network segments within walking distance
+
+Author: Michaela Barton
+Date: 12/11/24
 """
 
 # ------------------------ CONFIGURATION --------------------------#
 # Input Files
-STOPS_FILE = "C:/Users/micba/OneDrive/Documents/trimet/qgis_walkshed_automation/small_subset.shp"
-NETWORK_FILE = "C:/Users/micba/OneDrive/Documents/trimet/qgis_walkshed_automation/full_ped_net.shp"
+STOPS_FILE = r"" # G:/TRIMET/stops.shp or subset
+NETWORK_FILE = r"" # get a network .shp using G:/PUBLIC/OpenStreetMap/Pedestrian_network/ped_net_extract.py
 
 # Output Settings
-OUTPUT_FOLDER = "C:/Users/micba/OneDrive/Documents/trimet/projects/QGIS_walkshed_automation/output"
-OUTPUT_PREFIX = "small_subset3"  # prefix for output files (can be empty string)
+OUTPUT_FOLDER = r""
+OUTPUT_PREFIX = ""  # prefix for output files (can be empty string)
 
 # Processing Parameters
 DISTANCE_METERS = 804.672  # walking distance for walkshed (1/2 mile)
@@ -45,22 +58,22 @@ def prepare_network(stops_layer, network_layer, distance_meters):
     try:
         print("\nPreparing network for all stops...")
         
-        # Step 1: Buffer all stops
+        # Buffer all stops
         print("Creating buffer for all stops...")
         buffer_params = {
             'INPUT': stops_layer,
-            'DISTANCE': QgsExpression(f' {distance_meters} * 3.3').evaluate(),
+            'DISTANCE': QgsExpression(f' {distance_meters} * 3.3').evaluate(), # feet to meters converstion
             'SEGMENTS': 5,
             'END_CAP_STYLE': 0,
             'JOIN_STYLE': 0,
             'MITER_LIMIT': 2,
-            'DISSOLVE': True,  # Dissolve to get one combined buffer
+            'DISSOLVE': True,
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
         buffer_result = processing.run('native:buffer', buffer_params)
         
-        # Step 2: Clip network to combined buffer
-        print("Clipping network to combined buffer...")
+        # Clip network to buffer
+        print("Clipping network to buffer...")
         clip_params = {
             'INPUT': network_layer,
             'OVERLAY': buffer_result['OUTPUT'],
@@ -72,12 +85,12 @@ def prepare_network(stops_layer, network_layer, distance_meters):
         print("Splitting network lines...")
         split_params = {
             'INPUT': clip_result['OUTPUT'],
-            'LENGTH': 100,
+            'LENGTH': 100, # max feature length - 100 meters
             'OUTPUT': QgsProcessing.TEMPORARY_OUTPUT
         }
         split_result = processing.run('native:splitlinesbylength', split_params)
         
-        print("Network preparation complete")
+        print("Network prep complete")
         return split_result['OUTPUT']
         
     except Exception as e:
@@ -258,7 +271,6 @@ def process_routes(stops_layer, network_layer, output_prefix=""):
         for output_type, (layers, filename) in outputs.items():
             output_path = os.path.join(OUTPUT_FOLDER, filename)
             
-            # Use mergevectorlayers instead of package
             merge_params = {
                 'LAYERS': layers,
                 'CRS': stops_layer.crs(),
@@ -266,6 +278,7 @@ def process_routes(stops_layer, network_layer, output_prefix=""):
             }
             processing.run("native:mergevectorlayers", merge_params)
             print(f"Saved {output_type} to {output_path}")
+
 
 # Ensure output directory exists
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
